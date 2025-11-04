@@ -235,8 +235,89 @@ def generate_tokei_table(repo_path):
 
     return "\n".join(rows) + "\n"
 
+def generate_daily_commits_table(repo_path):
+    """生成每天提交的代码量表格"""
+    cmd = """git log --numstat --date=short --pretty="%ad" | awk 'NF==1{day=$1;next} NF==3&&$1~/^[0-9]+$/{net[day]+=$1-$2} END{PROCINFO["sorted_in"]="@ind_str_asc"; print "date,net"; for(d in net) printf "%s,%d\\n", d, net[d]}'"""
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=repo_path,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        output = result.stdout.strip()
+        if not output or output == "date,net":
+            return "无每日提交数据\n"
+
+        lines = output.split('\n')
+        if len(lines) <= 1:
+            return "无每日提交数据\n"
+
+        # 生成表格
+        rows = []
+        rows.append("|日期|净增代码行数|")
+        rows.append("|---|---|")
+
+        for line in lines[1:]:  # 跳过表头
+            if line.strip():
+                parts = line.split(',')
+                if len(parts) == 2:
+                    rows.append(f"|{parts[0]}|{parts[1]}|")
+
+        return "\n".join(rows) + "\n"
+    except Exception as e:
+        print(f"Failed to generate daily commits table in {repo_path}: {e}", file=sys.stderr)
+        return "无法生成每日提交数据\n"
+
+def generate_author_changes_table(repo_path):
+    """生成每个作者增减的代码行数表格"""
+    cmd = """git log --numstat --format="%aN" | awk 'NF==1{name=$0} NF==3{a[name]+=$1; d[name]+=$2} END{for(n in a) printf "%-25s +%-8d -%-8d\\n", n, a[n], d[n]}'"""
+
+    try:
+        result = subprocess.run(
+            cmd,
+            cwd=repo_path,
+            shell=True,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        output = result.stdout.strip()
+        if not output:
+            return "无作者提交数据\n"
+
+        lines = output.split('\n')
+        if not lines:
+            return "无作者提交数据\n"
+
+        # 生成表格
+        rows = []
+        rows.append("|作者名|新增行数|删除行数|")
+        rows.append("|---|---|---|")
+
+        for line in lines:
+            if line.strip():
+                # 解析格式: "作者名 +数字 -数字"
+                parts = line.split()
+                if len(parts) >= 3:
+                    # 作者名可能包含空格，取除了最后两个元素外的所有部分
+                    author = ' '.join(parts[:-2]).strip()
+                    added = parts[-2].replace('+', '')
+                    deleted = parts[-1].replace('-', '')
+                    rows.append(f"|{author}|{added}|{deleted}|")
+
+        return "\n".join(rows) + "\n"
+    except Exception as e:
+        print(f"Failed to generate author changes table in {repo_path}: {e}", file=sys.stderr)
+        return "无法生成作者变更数据\n"
+
 def generate_stats_table(repo_path):
-    """为指定的git仓库生成统计表格"""
+    """为指定的git仓库生成统计表格，隐藏全为零的列"""
     commits = collect_commits(repo_path)
     if not commits:
         return "无提交记录\n"
@@ -286,8 +367,18 @@ def generate_stats_table(repo_path):
             "langs": lang_sums,
         }
 
+    # 检查哪些语言列全为零
+    lang_has_data = {k: False for k in LANG_KEYS}
+    for author_stats in stats.values():
+        for k in LANG_KEYS:
+            if author_stats["langs"].get(k, 0) > 0:
+                lang_has_data[k] = True
+
+    # 只保留有数据的语言列
+    active_langs = [k for k in LANG_KEYS if lang_has_data[k]]
+
     # 生成表格
-    header = ["作者名", "首次提交日期", "最后一次提交日期", "提交次数", "新增行数"] + LANG_KEYS
+    header = ["作者名", "首次提交日期", "最后一次提交日期", "提交次数", "新增行数"] + active_langs
     rows = []
     rows.append("|" + "|".join(header) + "|")
     rows.append("|" + "|".join(["---"] * len(header)) + "|")
@@ -301,7 +392,7 @@ def generate_stats_table(repo_path):
             s["last"],
             str(s["commits"]),
             str(s["lines_added"]),
-        ] + [str(s["langs"].get(k, 0)) for k in LANG_KEYS]
+        ] + [str(s["langs"].get(k, 0)) for k in active_langs]
         rows.append("|" + "|".join(row) + "|")
 
     return "\n".join(rows) + "\n"
@@ -351,6 +442,18 @@ def main():
             f.write("### Git 统计\n\n")
             table = generate_stats_table(path)
             f.write(table)
+            f.write("\n")
+
+            # 每天提交的代码量表格
+            f.write("### 每天提交的代码量\n\n")
+            daily_table = generate_daily_commits_table(path)
+            f.write(daily_table)
+            f.write("\n")
+
+            # 每个作者增减的代码行数表格
+            f.write("### 每个作者增减的代码行数\n\n")
+            author_changes_table = generate_author_changes_table(path)
+            f.write(author_changes_table)
             f.write("\n")
 
             # Tokei代码统计表格

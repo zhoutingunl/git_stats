@@ -11,7 +11,7 @@ from datetime import datetime
 from collections import defaultdict
 
 # 复用 main.py 中的函数和常量
-LANG_KEYS = ["GO", "JAVA", "VUE", "KOTLIN", "JS", "JSON", "MD", "TEXT", "LOG", "Others"]
+LANG_KEYS = ["Python", "GO", "JAVA", "VUE", "Kotlin", "JS", "TypeScript", "JSON", "MD", "TEXT", "LOG", "Others"]
 
 def run_git(args, cwd="."):
     """执行git命令"""
@@ -54,6 +54,10 @@ def classify_ext(filename: str) -> str:
     if fn.startswith('"') and fn.endswith('"') and len(fn) >= 2:
         fn = fn[1:-1]
 
+    if fn.endswith(".py"):
+        return "Python"
+    if fn.endswith(".ts"):
+        return "TypeScript"
     if fn.endswith(".go"):
         return "GO"
     if fn.endswith(".java"):
@@ -61,7 +65,7 @@ def classify_ext(filename: str) -> str:
     if fn.endswith(".vue"):
         return "VUE"
     if fn.endswith(".kt"):
-        return "KOTLIN"
+        return "Kotlin"
     if fn.endswith(".js") or fn.endswith(".mjs") or fn.endswith(".cjs"):
         return "JS"
     if fn.endswith(".json"):

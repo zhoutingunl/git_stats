@@ -316,11 +316,68 @@ def generate_author_changes_table(repo_path):
         print(f"Failed to generate author changes table in {repo_path}: {e}", file=sys.stderr)
         return "无法生成作者变更数据\n"
 
+def generate_others_details_for_author(author, repo_path):
+    """为指定作者生成Others分类的详细信息(MD格式)"""
+    try:
+        # 调用 list_others_by_author.py
+        script_path = Path(__file__).parent / "list_others_by_author.py"
+        result = subprocess.run(
+            ["python3", str(script_path), author],
+            cwd=repo_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+
+        # 读取生成的summary文件
+        summary_file = Path(repo_path) / f"{author}_others_summary.tsv"
+        if not summary_file.exists():
+            return f"无法找到 {author} 的Others详细信息文件\n"
+
+        with open(summary_file, 'r', encoding='utf-8') as f:
+            lines = f.readlines()
+
+        if len(lines) <= 1:
+            return "无Others文件详情\n"
+
+        # 转换TSV为MD表格
+        md_lines = []
+        md_lines.append(f"#### 作者 '{author}' 的 Others 分类详细文件列表\n")
+        md_lines.append("|文件路径|新增行数总计|涉及提交数|")
+        md_lines.append("|---|---|---|")
+
+        # 跳过表头，处理数据行
+        for line in lines[1:]:
+            if line.strip():
+                parts = line.strip().split('\t')
+                if len(parts) == 3:
+                    file_path, added_sum, commits_count = parts
+                    md_lines.append(f"|{file_path}|{added_sum}|{commits_count}|")
+
+        # 清理生成的TSV文件
+        try:
+            summary_file.unlink()
+            detail_file = Path(repo_path) / f"{author}_others.tsv"
+            if detail_file.exists():
+                detail_file.unlink()
+        except Exception as e:
+            print(f"Warning: Failed to clean up TSV files: {e}", file=sys.stderr)
+
+        return "\n".join(md_lines) + "\n"
+
+    except subprocess.CalledProcessError as e:
+        print(f"Failed to run list_others_by_author.py for {author} in {repo_path}: {e.stderr}", file=sys.stderr)
+        return f"无法生成 {author} 的Others详细信息\n"
+    except Exception as e:
+        print(f"Error generating others details for {author}: {e}", file=sys.stderr)
+        return f"处理 {author} 的Others信息时出错\n"
+
 def generate_stats_table(repo_path):
     """为指定的git仓库生成统计表格，隐藏全为零的列"""
     commits = collect_commits(repo_path)
     if not commits:
-        return "无提交记录\n"
+        return "无提交记录\n", []
 
     per_commit_added_total, per_commit_added_langs = collect_added_by_commit(repo_path)
 
@@ -395,7 +452,15 @@ def generate_stats_table(repo_path):
         ] + [str(s["langs"].get(k, 0)) for k in active_langs]
         rows.append("|" + "|".join(row) + "|")
 
-    return "\n".join(rows) + "\n"
+    # 查找需要特殊处理的作者（Others类别超过2000行）
+    authors_with_large_others = []
+    for author, s in stats.items():
+        others_lines = s["langs"].get("Others", 0)
+        if others_lines > 2000:
+            authors_with_large_others.append(author)
+            print(f"  发现作者 '{author}' 的 'Others' 分类有 {others_lines} 行 (>2000), 将生成详细报告")
+
+    return "\n".join(rows) + "\n", authors_with_large_others
 
 def main():
     if len(sys.argv) < 2:
@@ -440,7 +505,7 @@ def main():
 
             # Git统计表格
             f.write("### Git 统计\n\n")
-            table = generate_stats_table(path)
+            table, authors_with_large_others = generate_stats_table(path)
             f.write(table)
             f.write("\n")
 
@@ -461,6 +526,14 @@ def main():
             tokei_table = generate_tokei_table(path)
             f.write(tokei_table)
             f.write("\n")
+
+            # 为Others分类超过2000行的作者生成详细报告
+            if authors_with_large_others:
+                for author in authors_with_large_others:
+                    print(f"  正在为作者 '{author}' 生成 Others 详细报告...")
+                    others_details = generate_others_details_for_author(author, path)
+                    f.write(others_details)
+                    f.write("\n")
 
     print(f"\n✅ 统计完成! 结果已保存到: {output_file}")
 

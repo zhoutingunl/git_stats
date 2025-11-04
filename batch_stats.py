@@ -11,7 +11,7 @@ from datetime import datetime
 from collections import defaultdict
 
 # 复用 main.py 中的函数和常量
-LANG_KEYS = ["Python", "GO", "JAVA", "VUE", "Kotlin", "JS", "TypeScript", "JSON", "MD", "TEXT", "LOG", "Others"]
+LANG_KEYS = ["Python", "GO", "JAVA", "VUE", "Kotlin", "JS", "TypeScript", "JSON", "MD", "Dockerfile", "TEXT", "LOG", "Others"]
 
 def run_git(args, cwd="."):
     """执行git命令"""
@@ -76,6 +76,9 @@ def classify_ext(filename: str) -> str:
         return "TEXT"
     if fn.endswith(".md"):
         return "MD"
+    if fn.endswith("Dockerfile"):
+        return "Dockerfile"
+
     return "Others"
 
 def collect_commits(repo_path):

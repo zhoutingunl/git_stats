@@ -6,6 +6,7 @@
 import os
 import sys
 import subprocess
+import json
 from pathlib import Path
 from datetime import datetime
 from collections import defaultdict
@@ -149,6 +150,91 @@ def collect_added_by_commit(repo_path):
 
     return per_commit_added_total, per_commit_added_langs
 
+def run_tokei(repo_path):
+    """运行tokei并返回统计数据"""
+    try:
+        # 尝试使用本地tokei或系统tokei
+        tokei_cmd = "/workspace/tokei" if os.path.exists("/workspace/tokei") else "tokei"
+        result = subprocess.run(
+            [tokei_cmd, ".", "--output", "json"],
+            cwd=repo_path,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            check=True,
+        )
+        return json.loads(result.stdout)
+    except subprocess.CalledProcessError as e:
+        print(f"Tokei command failed in {repo_path}: {e.stderr}", file=sys.stderr)
+        return None
+    except FileNotFoundError:
+        print(f"Tokei not found. Please install tokei.", file=sys.stderr)
+        return None
+    except json.JSONDecodeError as e:
+        print(f"Failed to parse tokei output: {e}", file=sys.stderr)
+        return None
+
+def generate_tokei_table(repo_path):
+    """为指定的git仓库生成tokei统计表格"""
+    tokei_data = run_tokei(repo_path)
+    if not tokei_data:
+        return "无法获取代码统计数据\n"
+
+    # 收集所有语言的统计信息(排除Total)
+    lang_stats = []
+    for lang_name, lang_data in tokei_data.items():
+        if lang_name == "Total":
+            continue
+        lang_stats.append({
+            "language": lang_name,
+            "files": len(lang_data.get("reports", [])),
+            "lines": lang_data.get("code", 0) + lang_data.get("comments", 0) + lang_data.get("blanks", 0),
+            "code": lang_data.get("code", 0),
+            "comments": lang_data.get("comments", 0),
+            "blanks": lang_data.get("blanks", 0),
+        })
+
+    if not lang_stats:
+        return "无代码文件\n"
+
+    # 按代码行数降序排序
+    lang_stats.sort(key=lambda x: x["code"], reverse=True)
+
+    # 生成表格
+    header = ["语言", "文件数", "总行数", "代码行数", "注释行数", "空白行数"]
+    rows = []
+    rows.append("|" + "|".join(header) + "|")
+    rows.append("|" + "|".join(["---"] * len(header)) + "|")
+
+    for stat in lang_stats:
+        row = [
+            stat["language"],
+            str(stat["files"]),
+            str(stat["lines"]),
+            str(stat["code"]),
+            str(stat["comments"]),
+            str(stat["blanks"]),
+        ]
+        rows.append("|" + "|".join(row) + "|")
+
+    # 添加总计行
+    if "Total" in tokei_data:
+        total = tokei_data["Total"]
+        total_lines = total.get("code", 0) + total.get("comments", 0) + total.get("blanks", 0)
+        # 计算总文件数
+        total_files = sum(stat["files"] for stat in lang_stats)
+        total_row = [
+            "**总计**",
+            str(total_files),
+            str(total_lines),
+            str(total.get("code", 0)),
+            str(total.get("comments", 0)),
+            str(total.get("blanks", 0)),
+        ]
+        rows.append("|" + "|".join(total_row) + "|")
+
+    return "\n".join(rows) + "\n"
+
 def generate_stats_table(repo_path):
     """为指定的git仓库生成统计表格"""
     commits = collect_commits(repo_path)
@@ -261,8 +347,16 @@ def main():
             f.write(f"## {name}\n\n")
             f.write(f"路径: `{path}`\n\n")
 
+            # Git统计表格
+            f.write("### Git 统计\n\n")
             table = generate_stats_table(path)
             f.write(table)
+            f.write("\n")
+
+            # Tokei代码统计表格
+            f.write("### 代码统计 (Tokei)\n\n")
+            tokei_table = generate_tokei_table(path)
+            f.write(tokei_table)
             f.write("\n")
 
     print(f"\n✅ 统计完成! 结果已保存到: {output_file}")

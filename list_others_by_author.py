@@ -4,41 +4,8 @@
 import subprocess
 import sys
 from collections import defaultdict
+from batch_stats import classify_ext
 
-def classify_ext(filename: str) -> str:
-    # 与批处理脚本保持一致的分类逻辑
-    if " -> " in filename:
-        filename = filename.split(" -> ", 1)[1]
-    fn = filename.lower()
-    if fn.startswith('"') and fn.endswith('"') and len(fn) >= 2:
-        fn = fn[1:-1]
-
-    if fn.endswith(".py"):
-        return "Python"
-    if fn.endswith(".ts"):
-        return "TypeScript"
-    if fn.endswith(".go"):
-        return "GO"
-    if fn.endswith(".java"):
-        return "JAVA"
-    if fn.endswith(".vue"):
-        return "VUE"
-    if fn.endswith(".kt"):
-        return "Kotlin"
-    if fn.endswith(".js") or fn.endswith(".mjs") or fn.endswith(".cjs"):
-        return "JS"
-    if fn.endswith(".json"):
-        return "JSON"
-    if fn.endswith(".log"):
-        return "LOG"
-    if fn.endswith(".txt"):
-        return "TEXT"
-    if fn.endswith(".md"):
-        return "MD"
-    if fn.endswith("Dockerfile"):
-        return "Dockerfile"
-
-    return "Others"
 
 def run_git(cmd_args):
     try:

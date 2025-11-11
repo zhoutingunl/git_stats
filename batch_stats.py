@@ -57,7 +57,7 @@ def classify_ext(filename: str) -> str:
 
     if fn.endswith(".py"):
         return "Python"
-    if fn.endswith(".ts"):
+    if fn.endswith(".ts") or fn.endswith(".tsx"):
         return "TypeScript"
     if fn.endswith(".go"):
         return "GO"
@@ -67,7 +67,7 @@ def classify_ext(filename: str) -> str:
         return "VUE"
     if fn.endswith(".kt"):
         return "Kotlin"
-    if fn.endswith(".js") or fn.endswith(".mjs") or fn.endswith(".cjs"):
+    if fn.endswith(".js") or fn.endswith(".mjs") or fn.endswith(".cjs") or fn.endswith(".jsx"):
         return "JS"
     if fn.endswith(".json"):
         return "JSON"

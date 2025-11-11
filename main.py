@@ -74,6 +74,7 @@ def classify_ext(filename: str) -> str:
         return "MD"
     return "Others"
 
+
 def collect_added_by_commit():
     """
     返回:

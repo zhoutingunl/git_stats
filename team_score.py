@@ -13,6 +13,17 @@ import json
 import statistics
 from collections import defaultdict
 from pathlib import Path
+import matplotlib.pyplot as plt
+import numpy as np
+import seaborn as sns
+import pandas as pd
+from scipy import stats
+
+# 设置中文字体
+font_candidates = ['Noto Sans CJK SC', 'Source Han Sans SC', 'WenQuanYi Micro Hei', 'PingFang SC', 'Microsoft YaHei', 'SimHei', 'Arial Unicode MS']
+plt.rcParams['font.sans-serif'] = font_candidates
+plt.rcParams['font.family'] = 'sans-serif'
+plt.rcParams['axes.unicode_minus'] = False
 
 class TeamScoreAnalyzer:
     def __init__(self, initial_file='input/202510.csv', final_file='input/202510_fin.csv'):
@@ -243,6 +254,301 @@ class TeamScoreAnalyzer:
         print(f"比较报告已导出至: {output_file}")
         return data
 
+    def plot_score_comparison(self, output_dir='plots'):
+        """绘制初评vs终评评分对比图表"""
+        if not self.comparison_data:
+            self.match_teams()
+
+        # 创建输出目录
+        Path(output_dir).mkdir(exist_ok=True)
+
+        # 提取数据
+        initial_scores = [t['initial_score'] for t in self.comparison_data]
+        final_scores = [t['final_score'] for t in self.comparison_data]
+        teams = [t['team'] for t in self.comparison_data]
+
+        # 计算相关系数
+        correlation = np.corrcoef(initial_scores, final_scores)[0, 1]
+        p_value = stats.pearsonr(initial_scores, final_scores)[1]
+
+        # 1. 散点图：初评vs终评
+        plt.figure(figsize=(10, 8))
+        plt.scatter(initial_scores, final_scores, alpha=0.7, s=60, edgecolors='black', linewidth=0.5)
+
+        # 添加对角线（完全一致线）
+        min_score = min(min(initial_scores), min(final_scores))
+        max_score = max(max(initial_scores), max(final_scores))
+        plt.plot([min_score, max_score], [min_score, max_score], 'r--', alpha=0.8, linewidth=2, label='完全一致线')
+
+        # 添加趋势线
+        z = np.polyfit(initial_scores, final_scores, 1)
+        p = np.poly1d(z)
+        plt.plot(initial_scores, p(initial_scores), 'b-', alpha=0.8, linewidth=2, label=f'趋势线 (y={z[0]:.3f}x+{z[1]:.3f})')
+
+        plt.xlabel('初评平均分', fontsize=12)
+        plt.ylabel('终评分', fontsize=12)
+        plt.title(f'初评vs终评评分散点图\n相关系数: r={correlation:.3f} (p={p_value:.3f})', fontsize=14)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+
+        # 添加部分队名标注（避免过于拥挤）
+        for i, (x, y, team) in enumerate(zip(initial_scores, final_scores, teams)):
+            if i % 5 == 0:  # 每5个标注一个
+                plt.annotate(team[:8], (x, y), xytext=(5, 5), textcoords='offset points',
+                           fontsize=8, alpha=0.7, rotation=15)
+
+        plt.tight_layout()
+        plt.savefig(f'{output_dir}/scatter_initial_vs_final.png', dpi=300, bbox_inches='tight')
+        plt.close()
+
+        # 2. 箱型图：初评vs终评分布对比
+        plt.figure(figsize=(10, 6))
+
+        # 准备箱型图数据
+        box_data = [initial_scores, final_scores]
+        box_labels = ['初评', '终评']
+
+        bp = plt.boxplot(box_data, labels=box_labels, patch_artist=True)
+
+        # 设置颜色
+        colors = ['lightblue', 'lightcoral']
+        for patch, color in zip(bp['boxes'], colors):
+            patch.set_facecolor(color)
+
+        # 添加散点图overlay
+        for i, (scores, label) in enumerate(zip(box_data, box_labels)):
+            x = np.random.normal(i+1, 0.04, len(scores))
+            plt.scatter(x, scores, alpha=0.5, s=20)
+
+        plt.ylabel('评分', fontsize=12)
+        plt.title('初评vs终评分数分布箱型图', fontsize=14)
+        plt.grid(True, alpha=0.3)
+
+        # 添加统计信息
+        initial_mean = np.mean(initial_scores)
+        initial_std = np.std(initial_scores)
+        final_mean = np.mean(final_scores)
+        final_std = np.std(final_scores)
+
+        plt.text(0.02, 0.98, f'初评: μ={initial_mean:.3f}, σ={initial_std:.3f}\n终评: μ={final_mean:.3f}, σ={final_std:.3f}',
+                transform=plt.gca().transAxes, verticalalignment='top',
+                bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+        plt.tight_layout()
+        plt.savefig(f'{output_dir}/boxplot_score_comparison.png', dpi=300, bbox_inches='tight')
+        plt.close()
+
+        # 3. 评分差异分布图
+        score_diffs = [t['score_diff'] for t in self.comparison_data]
+
+        plt.figure(figsize=(12, 5))
+
+        # 子图1：直方图
+        plt.subplot(1, 2, 1)
+        plt.hist(score_diffs, bins=20, alpha=0.7, edgecolor='black', color='skyblue')
+        plt.axvline(x=0, color='red', linestyle='--', alpha=0.8, linewidth=2, label='无变化线')
+        plt.axvline(x=np.mean(score_diffs), color='green', linestyle='-', alpha=0.8, linewidth=2, label=f'平均变化: {np.mean(score_diffs):.3f}')
+        plt.xlabel('评分差异 (终评-初评)', fontsize=11)
+        plt.ylabel('队伍数量', fontsize=11)
+        plt.title('评分差异分布', fontsize=12)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+
+        # 子图2：累积分布图
+        plt.subplot(1, 2, 2)
+        sorted_diffs = np.sort(score_diffs)
+        cumulative_prob = np.arange(1, len(sorted_diffs) + 1) / len(sorted_diffs)
+        plt.plot(sorted_diffs, cumulative_prob, linewidth=2, color='navy')
+        plt.axvline(x=0, color='red', linestyle='--', alpha=0.8, linewidth=2, label='无变化线')
+        plt.axhline(y=0.5, color='orange', linestyle=':', alpha=0.8, linewidth=2, label='50%分位线')
+        plt.xlabel('评分差异 (终评-初评)', fontsize=11)
+        plt.ylabel('累积概率', fontsize=11)
+        plt.title('评分差异累积分布', fontsize=12)
+        plt.legend()
+        plt.grid(True, alpha=0.3)
+
+        plt.tight_layout()
+        plt.savefig(f'{output_dir}/score_difference_distribution.png', dpi=300, bbox_inches='tight')
+        plt.close()
+
+        # 4. 相关性热力图（如果有CSV文件）
+        try:
+            # 读取CSV文件创建DataFrame
+            df_data = []
+            for team_data in self.comparison_data:
+                df_data.append({
+                    '队伍': team_data['team'],
+                    '初评': team_data['initial_score'],
+                    '终评': team_data['final_score'],
+                    '差异': team_data['score_diff'],
+                    '提升率': team_data['improvement_rate']
+                })
+
+            df = pd.DataFrame(df_data)
+            correlation_matrix = df[['初评', '终评', '差异', '提升率']].corr()
+
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(correlation_matrix, annot=True, fmt='.3f', cmap='RdBu_r',
+                       center=0, square=True, cbar_kws={'label': '相关系数'})
+            plt.title('评分指标相关性热力图', fontsize=14)
+            plt.tight_layout()
+            plt.savefig(f'{output_dir}/correlation_heatmap.png', dpi=300, bbox_inches='tight')
+            plt.close()
+
+        except Exception as e:
+            print(f"生成相关性热力图时出错: {e}")
+
+        print(f"所有图表已保存到 {output_dir}/ 目录")
+        print(f"- 散点图: scatter_initial_vs_final.png")
+        print(f"- 箱型图: boxplot_score_comparison.png")
+        print(f"- 差异分布图: score_difference_distribution.png")
+        print(f"- 相关性热力图: correlation_heatmap.png")
+        print(f"相关系数: {correlation:.3f} (p值: {p_value:.3f})")
+
+        return correlation, p_value
+
+    def plot_from_csv(self, csv_file='team_score_comparison.csv', output_dir='plots'):
+        """直接从CSV文件读取数据并生成图表"""
+        try:
+            # 读取CSV文件
+            df = pd.read_csv(csv_file, encoding='utf-8-sig')
+
+            # 创建输出目录
+            Path(output_dir).mkdir(exist_ok=True)
+
+            # 提取数据
+            initial_scores = df['初评平均分'].values
+            final_scores = df['终评分'].values
+            teams = df['队伍'].values
+            score_diffs = df['评分差异'].values
+
+            # 计算相关系数
+            correlation = np.corrcoef(initial_scores, final_scores)[0, 1]
+            p_value = stats.pearsonr(initial_scores, final_scores)[1]
+
+            # 1. 散点图：初评vs终评
+            plt.figure(figsize=(10, 8))
+            plt.scatter(initial_scores, final_scores, alpha=0.7, s=60, edgecolors='black', linewidth=0.5)
+
+            # 添加对角线（完全一致线）
+            min_score = min(min(initial_scores), min(final_scores))
+            max_score = max(max(initial_scores), max(final_scores))
+            plt.plot([min_score, max_score], [min_score, max_score], 'r--', alpha=0.8, linewidth=2, label='完全一致线')
+
+            # 添加趋势线
+            z = np.polyfit(initial_scores, final_scores, 1)
+            p = np.poly1d(z)
+            plt.plot(initial_scores, p(initial_scores), 'b-', alpha=0.8, linewidth=2, label=f'趋势线 (y={z[0]:.3f}x+{z[1]:.3f})')
+
+            plt.xlabel('初评平均分', fontsize=12)
+            plt.ylabel('终评分', fontsize=12)
+            plt.title(f'初评vs终评评分散点图\n相关系数: r={correlation:.3f} (p={p_value:.3f})', fontsize=14)
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            # 添加部分队名标注（避免过于拥挤）
+            for i, (x, y, team) in enumerate(zip(initial_scores, final_scores, teams)):
+                if i % 8 == 0:  # 每8个标注一个
+                    plt.annotate(team[:8], (x, y), xytext=(5, 5), textcoords='offset points',
+                               fontsize=8, alpha=0.7, rotation=15)
+
+            plt.tight_layout()
+            plt.savefig(f'{output_dir}/scatter_initial_vs_final.png', dpi=300, bbox_inches='tight')
+            plt.close()
+
+            # 2. 箱型图：初评vs终评分布对比
+            plt.figure(figsize=(10, 6))
+
+            # 准备箱型图数据
+            box_data = [initial_scores, final_scores]
+            box_labels = ['初评', '终评']
+
+            bp = plt.boxplot(box_data, labels=box_labels, patch_artist=True)
+
+            # 设置颜色
+            colors = ['lightblue', 'lightcoral']
+            for patch, color in zip(bp['boxes'], colors):
+                patch.set_facecolor(color)
+
+            # 添加散点图overlay
+            for i, (scores, label) in enumerate(zip(box_data, box_labels)):
+                x = np.random.normal(i+1, 0.04, len(scores))
+                plt.scatter(x, scores, alpha=0.5, s=20)
+
+            plt.ylabel('评分', fontsize=12)
+            plt.title('初评vs终评分数分布箱型图', fontsize=14)
+            plt.grid(True, alpha=0.3)
+
+            # 添加统计信息
+            initial_mean = np.mean(initial_scores)
+            initial_std = np.std(initial_scores)
+            final_mean = np.mean(final_scores)
+            final_std = np.std(final_scores)
+
+            plt.text(0.02, 0.98, f'初评: μ={initial_mean:.3f}, σ={initial_std:.3f}\n终评: μ={final_mean:.3f}, σ={final_std:.3f}',
+                    transform=plt.gca().transAxes, verticalalignment='top',
+                    bbox=dict(boxstyle='round', facecolor='white', alpha=0.8))
+
+            plt.tight_layout()
+            plt.savefig(f'{output_dir}/boxplot_score_comparison.png', dpi=300, bbox_inches='tight')
+            plt.close()
+
+            # 3. 评分差异分布图
+            plt.figure(figsize=(12, 5))
+
+            # 子图1：直方图
+            plt.subplot(1, 2, 1)
+            plt.hist(score_diffs, bins=20, alpha=0.7, edgecolor='black', color='skyblue')
+            plt.axvline(x=0, color='red', linestyle='--', alpha=0.8, linewidth=2, label='无变化线')
+            plt.axvline(x=np.mean(score_diffs), color='green', linestyle='-', alpha=0.8, linewidth=2, label=f'平均变化: {np.mean(score_diffs):.3f}')
+            plt.xlabel('评分差异 (终评-初评)', fontsize=11)
+            plt.ylabel('队伍数量', fontsize=11)
+            plt.title('评分差异分布', fontsize=12)
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            # 子图2：累积分布图
+            plt.subplot(1, 2, 2)
+            sorted_diffs = np.sort(score_diffs)
+            cumulative_prob = np.arange(1, len(sorted_diffs) + 1) / len(sorted_diffs)
+            plt.plot(sorted_diffs, cumulative_prob, linewidth=2, color='navy')
+            plt.axvline(x=0, color='red', linestyle='--', alpha=0.8, linewidth=2, label='无变化线')
+            plt.axhline(y=0.5, color='orange', linestyle=':', alpha=0.8, linewidth=2, label='50%分位线')
+            plt.xlabel('评分差异 (终评-初评)', fontsize=11)
+            plt.ylabel('累积概率', fontsize=11)
+            plt.title('评分差异累积分布', fontsize=12)
+            plt.legend()
+            plt.grid(True, alpha=0.3)
+
+            plt.tight_layout()
+            plt.savefig(f'{output_dir}/score_difference_distribution.png', dpi=300, bbox_inches='tight')
+            plt.close()
+
+            # 4. 相关性热力图
+            numeric_columns = ['初评平均分', '终评分', '评分差异', '评分提升率']
+            correlation_matrix = df[numeric_columns].corr()
+
+            plt.figure(figsize=(8, 6))
+            sns.heatmap(correlation_matrix, annot=True, fmt='.3f', cmap='RdBu_r',
+                       center=0, square=True, cbar_kws={'label': '相关系数'})
+            plt.title('评分指标相关性热力图', fontsize=14)
+            plt.tight_layout()
+            plt.savefig(f'{output_dir}/correlation_heatmap.png', dpi=300, bbox_inches='tight')
+            plt.close()
+
+            print(f"从CSV文件 {csv_file} 生成的图表已保存到 {output_dir}/ 目录")
+            print(f"- 散点图: scatter_initial_vs_final.png")
+            print(f"- 箱型图: boxplot_score_comparison.png")
+            print(f"- 差异分布图: score_difference_distribution.png")
+            print(f"- 相关性热力图: correlation_heatmap.png")
+            print(f"相关系数: {correlation:.3f} (p值: {p_value:.3f})")
+
+            return correlation, p_value
+
+        except Exception as e:
+            print(f"从CSV文件生成图表时出错: {e}")
+            return None, None
+
     def run_full_analysis(self):
         """运行完整分析"""
         print("开始完整的团队评分分析...")
@@ -263,6 +569,20 @@ class TeamScoreAnalyzer:
         print("\n正在导出详细报告...")
         report = self.export_comparison_report()
 
+        # 生成图表
+        print("\n正在生成图表...")
+        try:
+            correlation, p_value = self.plot_score_comparison()
+            print(f"\n=== 图表分析结果 ===")
+            print(f"初评与终评相关系数: {correlation:.3f}")
+            print(f"相关性显著性检验p值: {p_value:.3f}")
+            if p_value < 0.05:
+                print("相关性显著 (p < 0.05)")
+            else:
+                print("相关性不显著 (p ≥ 0.05)")
+        except Exception as e:
+            print(f"生成图表时出错: {e}")
+
         print("\n=== 分析完成 ===")
         return report
 
@@ -280,8 +600,12 @@ def main():
         report = analyzer.run_full_analysis()
 
         print("\n分析结果已生成:")
-        print("1. team_score_analysis.png - 分析图表")
-        print("2. team_score_comparison.csv - 详细报告")
+        print("1. team_score_comparison.csv - 详细报告")
+        print("2. plots/ - 图表目录:")
+        print("   - scatter_initial_vs_final.png - 初评vs终评散点图")
+        print("   - boxplot_score_comparison.png - 初评vs终评箱型图")
+        print("   - score_difference_distribution.png - 评分差异分布图")
+        print("   - correlation_heatmap.png - 相关性热力图")
 
     except FileNotFoundError as e:
         print(f"文件未找到错误: {e}")
@@ -294,5 +618,39 @@ def main():
         traceback.print_exc()
 
 
+def plot_from_existing_csv():
+    """直接从现有CSV文件生成图表（无需重新分析数据）"""
+    print("团队评分图表生成工具")
+    print("=" * 50)
+
+    analyzer = TeamScoreAnalyzer()
+
+    try:
+        # 直接从CSV生成图表
+        correlation, p_value = analyzer.plot_from_csv('team_score_comparison.csv', 'plots')
+
+        if correlation is not None:
+            print(f"\n=== 图表分析结果 ===")
+            print(f"初评与终评相关系数: {correlation:.3f}")
+            print(f"相关性显著性检验p值: {p_value:.3f}")
+            if p_value < 0.05:
+                print("相关性显著 (p < 0.05)")
+            else:
+                print("相关性不显著 (p ≥ 0.05)")
+
+    except FileNotFoundError:
+        print("未找到team_score_comparison.csv文件，正在运行完整分析...")
+        main()
+    except Exception as e:
+        print(f"生成图表时出错: {e}")
+        import traceback
+        traceback.print_exc()
+
+
 if __name__ == "__main__":
-    main()
+    # 如果存在CSV文件，直接生成图表；否则运行完整分析
+    import os
+    if os.path.exists('team_score_comparison.csv'):
+        plot_from_existing_csv()
+    else:
+        main()
